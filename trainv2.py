@@ -31,11 +31,15 @@ def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.):
         dtype=tf.float32)
     cls_weights = tf.reduce_mean(train_samples) / train_samples
     @tf.function
-    def trainstep(model, x, y, optimizer):
+    def trainstep(model, model2, x, y, optimizer):
         with tf.GradientTape() as tape:
             y_p = model(x, training=True)
+            y_p2 = model2(x, training=True)
             sed, doa = y
             sed_pred, doa_pred = y_p
+            sed_pred2, doa_pred2 = y_p2
+            sed_pred, doa_pred = sed_pred + sed_pred2 / 2, doa_pred + doa_pred2 / 2
+
 
             if label_smoothing > 0:
                 sed = sed * (1-label_smoothing) + 0.5 * label_smoothing
@@ -60,10 +64,11 @@ def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.):
 
 def generate_teststep(sed_loss, doa_loss):
     @tf.function
-    def teststep(model, x, y, optimizer=None):
+    def teststep(model, model2, x, y, optimizer=None):
         y_p = model(x, training=False)
-        sloss = sed_loss(y[0], y_p[0])
-        dloss = doa_loss(y[1], y_p[1])
+        y_p2 = model2(x, training=False)
+        sloss = sed_loss(y[0], y_p[0] + y_p2[0] / 2)
+        dloss = doa_loss(y[1], y_p[1] + y_p2[1] / 2)
         return y_p, sloss, dloss
     return teststep
 
@@ -75,14 +80,14 @@ def generate_iterloop(sed_loss, doa_loss, evaluator, writer,
     else:
         step = generate_teststep(sed_loss, doa_loss)
 
-    def iterloop(model, dataset, epoch, optimizer=None):
+    def iterloop(model, model2, dataset, epoch, optimizer=None):
         evaluator.reset_states()
         ssloss = tf.keras.metrics.Mean()
         ddloss = tf.keras.metrics.Mean()
 
         with tqdm(dataset) as pbar:
             for x, y in pbar:
-                preds, sloss, dloss = step(model, x, y, optimizer)
+                preds, sloss, dloss = step(model, model2, x, y, optimizer)
 
                 evaluator.update_states(y, preds)
                 metric_values = evaluator.result()
@@ -269,10 +274,19 @@ def main(config):
     # model load
     model_config['n_classes'] = n_classes
     model = getattr(models, config.model)(input_shape, model_config)
+    
+    model2_config = os.path.join('./model_config', "SS2.json")
+    if not os.path.exists(model2_config):
+        raise ValueError('Model config is not exists')
+    import json
+    model2_config = json.load(open(model2_config,'rb'))
+
+    model2 = getattr(models, config.model)(input_shape, model2_config)
     model.summary()
+    model2.summary()
 
     model = apply_kernel_regularizer(model, kernel_regularizer)
-
+    model2 = apply_kernel_regularizer(model2, kernel_regularizer)
     optimizer = AdaBelief(config.lr)
     if config.sed_loss == 'BCE':
         sed_loss = tf.keras.backend.binary_crossentropy
@@ -283,6 +297,7 @@ def main(config):
 
     # stochastic weight averaging
     swa = SWA(model, swa_start_epoch, swa_freq)
+    swa2 = SWA(model2, swa_start_epoch, swa_freq)
 
     if config.resume:
         _model_path = sorted(glob(model_path + '/*.hdf5'))
@@ -312,13 +327,15 @@ def main(config):
 
         if epoch % 10 == 0:
             evaluate_fn(model, epoch)
+            
 
         # train loop
-        train_iterloop(model, trainset, epoch, optimizer)
-        score = val_iterloop(model, valset, epoch)
-        test_iterloop(model, testset, epoch)
+        train_iterloop(model, model2, trainset, epoch, optimizer)
+        score = val_iterloop(model, model2, valset, epoch)
+        test_iterloop(model, model2, testset, epoch)
 
         swa.on_epoch_end(epoch)
+        swa2.on_epoch_end(epoch)
 
         if best_score > score:
             os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
@@ -328,6 +345,10 @@ def main(config):
             tf.keras.models.save_model(
                 model, 
                 os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
+                include_optimizer=False)
+            tf.keras.models.save_model(
+                model2, 
+                os.path.join(model_path, f'bestscore_{best_score}2.hdf5'), 
                 include_optimizer=False)
         else:
             '''
@@ -345,12 +366,17 @@ def main(config):
     # end of training
     print(f'epoch: {epoch}')
     swa.on_train_end()
+    swa2.on_train_end()
 
-    seld_score, *_ = evaluate_fn(model, epoch)
+    seld_score, *_ = evaluate_fn(model, model2, epoch)
 
     tf.keras.models.save_model(
         model, 
         os.path.join(model_path, f'SWA_best_{seld_score:.5f}.hdf5'),
+        include_optimizer=False)
+    tf.keras.models.save_model(
+        model2, 
+        os.path.join(model_path, f'SWA_best_{seld_score:.5f}2.hdf5'),
         include_optimizer=False)
 
 
