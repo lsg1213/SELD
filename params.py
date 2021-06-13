@@ -9,28 +9,28 @@ def get_param(known=None):
     
     args.add_argument('--name', type=str, required=True)
 
-    args.add_argument('--gpus', type=str, default='-1')
+    args.add_argument('--gpus', type=str, default='0')
     args.add_argument('--resume', action='store_true')    
-    args.add_argument('--abspath', type=str, default='./')
+    args.add_argument('--abspath', type=str, default='/home/iris/datasets')
     args.add_argument('--config_mode', type=str, default='')
-    args.add_argument('--doa_loss', type=str, default='MSE', 
+    args.add_argument('--doa_loss', type=str, default='MMSE', 
                       choices=['MAE', 'MSE', 'MSLE', 'MMSE'])
-    args.add_argument('--model', type=str, default='seldnet')
+    args.add_argument('--model', type=str, default='conv_temporal')
     args.add_argument('--model_config', type=str, default='')
     args.add_argument('--output_path', type=str, default='./output')
-    args.add_argument('--ans_path', type=str, default='/seld-dcase2021/foa_dev_raw/raw_and_label/foa_dev_raw/metadata_dev/')
+    args.add_argument('--ans_path', type=str, default='/home/iris/datasets/DCASE2021/metadata_dev/')
     
 
     # training
-    args.add_argument('--lr', type=float, default=0.001)
+    args.add_argument('--lr', type=float, default=0.002)
     args.add_argument('--decay', type=float, default=0.5)
-    args.add_argument('--batch', type=int, default=256)
+    args.add_argument('--batch', type=int, default=512)
     args.add_argument('--agc', type=bool, default=False)
     args.add_argument('--epoch', type=int, default=1000)
     args.add_argument('--loss_weight', type=str, default='1,1000')
-    args.add_argument('--lr_patience', type=int, default=80, 
+    args.add_argument('--lr_patience', type=int, default=16, 
                       help='learning rate decay patience for plateau')
-    args.add_argument('--patience', type=int, default=100, 
+    args.add_argument('--patience', type=int, default=64, 
                       help='early stop patience')
     args.add_argument('--freq_mask_size', type=int, default=16)
     args.add_argument('--time_mask_size', type=int, default=24)
